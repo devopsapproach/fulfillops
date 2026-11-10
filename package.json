@@ -1,0 +1,20 @@
+{
+  "name": "capstone",
+  "version": "1.0.0",
+  "description": "API DevOps Project",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devopsapproach/capstone.git"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.4",
+    "@commitlint/config-conventional": "^21.2.4",
+    "husky": "^9.1.7"
+  }
+}

@@ -1,0 +1,8 @@
+# Project Manual
+manual/*
+
+
+# Dependencies
+.husky/
+node_modules/
+
