@@ -6,3 +6,10 @@ manual/*
 .husky/
 node_modules/
 
+node_modules/
+dist/
+coverage/
+generated/
+.env
+.env.*
+!.env.example
