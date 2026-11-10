@@ -1,15 +1,16 @@
 # Project Manual
 manual/*
 
-
 # Dependencies
 .husky/
 node_modules/
 
-node_modules/
+# Build
 dist/
 coverage/
 generated/
+
+# Env
 .env
 .env.*
 !.env.example
