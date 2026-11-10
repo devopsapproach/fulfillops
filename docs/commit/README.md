@@ -4,13 +4,13 @@ This project uses `Husky` and `commitlint` to enforce [Conventional Commits](htt
 
 ## Enforcement Layers
 
-* **Local (Husky):** Intercepts commits on machine via a `commit-msg` hook.
-* **Remote (GitHub Actions):** Validates all Pushes and PRs in the cloud to ensure branch integrity.
+- **Local (Husky):** Intercepts commits on machine via a `commit-msg` hook.
+- **Remote (GitHub Actions):** Validates all Pushes and PRs in the cloud to ensure branch integrity.
 
 ## Tooling
 
-* **[commitlint](https://commitlint.js.org/):** The engine that validates message structure.
-* **[Husky](https://typicode.github.io/husky/):** Connects the linter to Git's lifecycle.
+- **[commitlint](https://commitlint.js.org/):** The engine that validates message structure.
+- **[Husky](https://typicode.github.io/husky/):** Connects the linter to Git's lifecycle.
 
 ## ⚠️ Bypass
 
