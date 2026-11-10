@@ -2,7 +2,6 @@
 manual/*
 
 # Dependencies
-.husky/
 node_modules/
 
 # Build
