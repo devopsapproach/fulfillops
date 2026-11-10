@@ -41,19 +41,32 @@ jobs:
       # On a push event, validate the commits that were introduced
       # by this push.
       - name: Validate pushed commits
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && github.event.deleted == false
+        shell: bash
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
         run: |
-          # Check all commits between the previous revision and
-          # the new revision.
-          #
-          # github.event.before = commit SHA before the push
-          # github.event.after  = commit SHA after the push
-          #
-          # --verbose displays detailed commitlint output.
-          npx commitlint \
-            --from "${{ github.event.before }}" \
-            --to "${{ github.event.after }}" \
-            --verbose
+          set -euo pipefail
+
+          ZERO_SHA="0000000000000000000000000000000000000000"
+
+          if [ "$BEFORE_SHA" = "$ZERO_SHA" ]; then
+            echo "First push: validating the branch's complete commit history."
+
+            git rev-list --reverse "$AFTER_SHA" > "$RUNNER_TEMP/commits-to-lint"
+
+            while IFS= read -r commit_sha; do
+              echo "Validating commit $commit_sha"
+              git show --no-patch --format=%B "$commit_sha" |
+                npx --no -- commitlint --verbose
+            done < "$RUNNER_TEMP/commits-to-lint"
+          else
+            npx --no -- commitlint \
+              --from "$BEFORE_SHA" \
+              --to "$AFTER_SHA" \
+              --verbose
+          fi
 
       # On a Pull Request event, validate the commits that are part
       # of the PR compared with the target branch.
