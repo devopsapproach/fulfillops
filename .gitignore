@@ -13,3 +13,5 @@ generated/
 .env
 .env.*
 !.env.example
+
+NOTES.md
