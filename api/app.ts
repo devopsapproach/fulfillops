@@ -4,7 +4,7 @@ import { ApiError, errorBody } from "./errors.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { healthRouter } from "./routes/health.js";
 
-export type Database = PrismaClient;
+export type Database = Pick<PrismaClient, "product" | "$queryRaw">;
 
 export interface AppDependencies {
   database: Database;

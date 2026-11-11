@@ -30,9 +30,28 @@ export function healthRouter(database: Database) {
     try {
       const rows = await withTimeout(
         database.$queryRaw<{ ready: boolean }[]>`
-          SELECT to_regclass('public.products') IS NOT NULL
-             AND to_regclass('public.orders') IS NOT NULL
-             AND to_regclass('public.jobs') IS NOT NULL AS ready
+        SELECT
+          to_regclass('public.products') IS NOT NULL
+          AND to_regclass('public.orders') IS NOT NULL
+          AND to_regclass('public.order_items') IS NOT NULL
+          AND to_regclass('public.jobs') IS NOT NULL
+          AND to_regclass('public.fulfillment_receipts') IS NOT NULL
+
+          AND EXISTS (
+            SELECT 1
+            FROM public._prisma_migrations
+            WHERE migration_name = '20261111103447_initial_schema'
+              AND finished_at IS NOT NULL
+              AND rolled_back_at IS NULL
+          )
+
+          AND EXISTS (
+            SELECT 1
+            FROM public._prisma_migrations
+            WHERE migration_name = '20261111104128_create_domain_tables'
+              AND finished_at IS NOT NULL
+              AND rolled_back_at IS NULL
+          ) AS ready
         `,
         READINESS_TIMEOUT_MS,
       );
