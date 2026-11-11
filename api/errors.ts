@@ -1,4 +1,3 @@
-
 export type ErrorCode =
   | "INVALID_JSON"
   | "INVALID_REQUEST"

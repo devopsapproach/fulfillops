@@ -106,7 +106,6 @@ export function parseOrderRequest(body: unknown): CanonicalOrder {
   return { customer_id: customerId, items: lines };
 }
 
-
 export function canonicalString(order: CanonicalOrder): string {
   return JSON.stringify({
     customer_id: order.customer_id,
