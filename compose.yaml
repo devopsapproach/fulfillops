@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:16.6-alpine
+    container_name: fulfillops-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fulfillops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+      POSTGRES_DB: ${POSTGRES_DB:-fulfillops_dev}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/01-init-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-fulfillops} -d $${POSTGRES_DB:-fulfillops_dev}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: fulfillops-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 8080
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fulfillops}:${POSTGRES_PASSWORD:-CHANGE_ME}@db:5432/${POSTGRES_DB:-fulfillops_dev}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - "${PORT:-8080}:8080"
+    command: ["node", "dist/api/server.js"]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8080/health/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    container_name: fulfillops-worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fulfillops}:${POSTGRES_PASSWORD:-CHANGE_ME}@db:5432/${POSTGRES_DB:-fulfillops_dev}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-500}
+      WORKER_LEASE_MS: ${WORKER_LEASE_MS:-10000}
+      WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-3}
+      WORKER_RETRY_BASE_MS: ${WORKER_RETRY_BASE_MS:-1000}
+    command: ["node", "dist/worker/main.js"]
+
+volumes:
+  pgdata:
