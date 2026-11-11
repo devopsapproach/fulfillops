@@ -46,6 +46,15 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+      
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Apply test database migrations
+        run: npm run db:migrate:deploy
+
+      - name: Run database integration tests
+        run: npm run test:integration
 
       - name: Run static checks, unit tests, and TypeScript build
         run: npm run check
