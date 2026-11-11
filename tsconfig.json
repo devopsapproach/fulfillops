@@ -15,7 +15,9 @@
     "api/**/*.ts",
     "worker/**/*.ts",
     "shared/**/*.ts",
-    "tests/**/*.ts"
+    "tests/**/*.ts",
+    "prisma/seed.ts",
+    "prisma.config.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

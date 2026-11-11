@@ -8,13 +8,21 @@ and process persisted jobs through a separate worker.
 
 ## Current foundation
 
-The initial foundation provides:
+The repository contains:
 
-- TypeScript configuration and build commands.
+- TypeScript configuration, quality checks, and build commands.
 - An Express API with a liveness endpoint.
-- A basic API test using Vitest and Supertest.
-- ESLint, Prettier, Husky, and commitlint.
-- A shared architecture agreement in `docs/ADR-001.md`.
+- PostgreSQL 16 through Docker Compose.
+- Prisma models and SQL migrations for products, orders, order items,
+  jobs, and fulfillment receipts.
+- A shared Prisma database client.
+- A catalog seed script that preserves existing products.
+- A database integration test for the nonnegative-stock constraint.
+- A worker startup skeleton.
+- GitHub Actions configuration and commit-message checks.
+
+Order processing, worker recovery, and complete contract verification
+remain part of subsequent implementation work.
 
 Database-backed routes, migrations, worker processing, and Docker Compose
 are delivered through subsequent feature tickets.
@@ -52,34 +60,114 @@ The install runs the `prepare` script to initialize Husky hooks.
 
 ## Environment configuration
 
-Create a local environment file:
+Create `.env` if it does not already exist:
 
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 ```
 
-Update the placeholders for your local environment.
+Replace the placeholder credentials with your local values.
 
-| Variable                  | Purpose                                    |
-| ------------------------- | ------------------------------------------ |
-| `NODE_ENV`                | Runtime mode                               |
-| `PORT`                    | API port, default `8080`                   |
-| `DATABASE_URL`            | Application database connection            |
-| `TEST_DATABASE_URL`       | Separate isolated test database connection |
-| `LOG_LEVEL`               | Logging verbosity                          |
-| `WORKER_POLL_INTERVAL_MS` | Delay between checks for available work    |
-| `WORKER_LEASE_MS`         | Duration of a job claim                    |
-| `WORKER_MAX_ATTEMPTS`     | Maximum processing attempts                |
-| `WORKER_RETRY_BASE_MS`    | Base retry delay                           |
+| Variable                  | Purpose                                                          |
+| ------------------------- | ---------------------------------------------------------------- |
+| `POSTGRES_USER`           | Development database administrator created during initialization |
+| `POSTGRES_PASSWORD`       | Development database password                                    |
+| `POSTGRES_DB`             | Development database name                                        |
+| `POSTGRES_PORT`           | PostgreSQL port exposed on the host                              |
+| `DATABASE_URL`            | Connection used by the application and Prisma migrations         |
+| `TEST_DATABASE_URL`       | Connection to the isolated test database                         |
+| `PORT`                    | API listening port                                               |
+| `NODE_ENV`                | Runtime mode                                                     |
+| `LOG_LEVEL`               | Logging verbosity                                                |
+| `WORKER_POLL_INTERVAL_MS` | Planned worker polling interval                                  |
+| `WORKER_LEASE_MS`         | Planned job lease duration                                       |
+| `WORKER_MAX_ATTEMPTS`     | Planned default attempt limit                                    |
+| `WORKER_RETRY_BASE_MS`    | Planned retry backoff base                                       |
 
-The initial liveness API uses `PORT` and can run without PostgreSQL.
-Database and worker settings are consumed when those components are added.
+The username, password, database, and port in `DATABASE_URL` must match
+the development database configuration.
 
-Keep real credentials in your local `.env`.
-Commit only placeholder values in `.env.example`.
+Use URL-encoded passwords in connection URLs when they contain special
+characters.
 
-When running applications on the host, a local database connection may use
-`localhost`. Inside Docker Compose, use the database service hostname.
+Compose initializes database credentials only when its data directory is
+empty. Editing `.env` does not change an existing database user's password.
+
+Keep real credentials in `.env` and commit only `.env.example`.
+
+Applications running on the host connect through `localhost`.
+Applications inside Compose use the database service hostname `db`.
+
+Values in `.env` are loaded by the application through dotenv.
+They do not automatically become Bash variables.
+
+## Database setup
+
+Start PostgreSQL:
+
+```bash
+docker compose up -d db
+docker compose ps db
+```
+
+Generate the Prisma client, apply committed migrations, and seed the catalog:
+
+```bash
+npm run db:generate
+npm run db:migrate:deploy
+npm run db:seed
+```
+
+The initial catalog contains:
+
+| SKU      | Unit price in cents | Initial stock |
+| -------- | ------------------: | ------------: |
+| KIT-100  |                1299 |             7 |
+| PART-200 |                 599 |            12 |
+| PACK-300 |                 249 |             5 |
+
+Seeding inserts missing products. Existing prices and stock remain unchanged,
+including stock already consumed by orders.
+
+Inspect the catalog:
+
+```bash
+docker compose exec db psql -U fulfillops -d fulfillops_dev \
+  -c "SELECT sku, unit_price_cents, available FROM products ORDER BY sku;"
+```
+
+These inspection commands assume the default development username and
+database name.
+
+Stop the stack while preserving its database volume:
+
+```bash
+docker compose down
+```
+
+## Schema changes
+
+Edit `prisma/schema.prisma`, then generate a draft migration:
+
+```bash
+npx prisma format
+npx prisma validate
+npm run db:migrate:dev -- --name describe_your_change --create-only
+```
+
+Review the generated SQL and add required custom constraints or indexes
+before applying the new migration.
+
+```bash
+npm run db:migrate:dev
+npm run db:generate
+```
+
+Commit the schema and migration files, including `migration_lock.toml`.
+
+Once a migration has been applied and shared, preserve it and create a new
+migration for later changes. Generated Prisma client files are recreated
+locally and during builds.
 
 ## Start the API during development
 
@@ -155,6 +243,72 @@ git status
 
 Review formatting changes before committing.
 
+## Database integration tests
+
+Integration tests use the separate `fulfillops_test` database.
+
+On first initialization, `scripts/init-db.sql` creates the test user and
+database. Its current password is a development placeholder. Set your
+chosen password before configuring the test connection.
+
+Open PostgreSQL:
+
+```bash
+docker compose exec db psql -U fulfillops -d fulfillops_dev
+```
+
+Inspect existing users and databases:
+
+```text
+\du
+\l
+```
+
+If the test role exists, set its password:
+
+```text
+\password fulfillops_test
+```
+
+If the role or database is missing, create only the missing item:
+
+```sql
+CREATE ROLE fulfillops_test LOGIN;
+CREATE DATABASE fulfillops_test OWNER fulfillops_test;
+```
+
+Then set the test password with `\password fulfillops_test` and exit
+using `\q`.
+
+Update `TEST_DATABASE_URL` in `.env` with the matching password.
+
+For the migration command, export the same connection in your terminal:
+
+```bash
+export TEST_DATABASE_URL='postgresql://fulfillops_test:YOUR_TEST_PASSWORD@localhost:5432/fulfillops_test'
+```
+
+Apply migrations and run the integration suite:
+
+```bash
+DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate:deploy
+npm run test:integration
+```
+
+The inline `DATABASE_URL` override targets the test database for that
+migration command.
+
+The integration test uses `TEST_DATABASE_URL` directly. An exported
+environment variable takes precedence over its value in `.env`, so keep
+them consistent.
+
+The initial test verifies that PostgreSQL rejects negative stock and
+rolls back its temporary test data. It requires migrations but does not
+require catalog seeding.
+
+`npm run check` runs the foundation checks and unit tests.
+Run `npm run test:integration` separately for database verification.
+
 ## Branch and review workflow
 
 Start feature work from an updated `main`:
@@ -188,9 +342,9 @@ See `docs/commit/COMMIT_CONVENTION.md` for commit-message conventions.
 
 | Developer | Primary responsibility                      | First handoff                               |
 | --------- | ------------------------------------------- | ------------------------------------------- |
-| A         | API routes, validation, order acceptance    | API entry point and contract behavior       |
-| B         | Schema, migrations, database access, worker | Agreed schema and generated database client |
-| C         | Tooling, Compose, CI, integration harness   | Running database and reproducible checks    |
+| Jaimie    | API routes, validation, order acceptance    | API entry point and contract behavior       |
+| Iulian    | Schema, migrations, database access, worker | Agreed schema and generated database client |
+| Sultan    | Tooling, Compose, CI, integration harness   | Running database and reproducible checks    |
 
 All developers review the architecture agreement before starting
 features that depend on shared schema or interfaces.
@@ -200,23 +354,28 @@ Shared command and configuration changes must be reflected in this README.
 
 ## Planned commands
 
-The following commands are added by their implementation tickets:
+## Database commands and handoff
 
-| Command                        | Owner |
-| ------------------------------ | ----- |
-| `npm run dev:worker`           | B     |
-| `npm run start:worker`         | B     |
-| `npm run db:generate`          | B     |
-| `npm run db:migrate:dev`       | B     |
-| `npm run db:migrate:deploy`    | B     |
-| `npm run db:seed`              | B     |
-| `npm run db:reset:test`        | B     |
-| `npm run test:integration`     | C     |
-| `npm run test:concurrency`     | C     |
-| `docker compose up -d --build` | C     |
+| Command                     | Purpose                                 |
+| --------------------------- | --------------------------------------- |
+| `npm run db:generate`       | Generate the Prisma client              |
+| `npm run db:migrate:dev`    | Create and apply development migrations |
+| `npm run db:migrate:deploy` | Apply committed migrations              |
+| `npm run db:seed`           | Insert missing catalog products         |
+| `npm run test:integration`  | Run database integration tests          |
+| `npm run dev:worker`        | Start the current worker skeleton       |
 
-Move these commands into the installation and testing instructions
-when their implementations are available.
+After pulling database changes, teammates should run:
+
+1. `npm ci`
+2. `npm run db:generate`
+3. `npm run db:migrate:deploy`
+4. `npm run db:seed`
+
+API and worker code import the shared `database` client from
+`shared/database.ts`, using the appropriate relative path.
+
+The guarded test-reset command and concurrency test suite remain planned.
 
 ## Assessment tests
 

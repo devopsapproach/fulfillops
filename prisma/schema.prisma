@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../shared/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum OrderStatus {
+  queued
+  processing
+  completed
+  failed
+
+  @@map("order_status")
+}
+
+enum JobState {
+  pending
+  claimed
+  completed
+  dead_letter
+
+  @@map("job_state")
+}
+
+model Product {
+  sku            String      @id
+  unitPriceCents Int         @map("unit_price_cents")
+  available      Int
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
+  orderItems     OrderItem[]
+
+  @@map("products")
+}
+
+model Order {
+  id               String              @id @default(uuid()) @db.Uuid
+  idempotencyKey   String              @unique @map("idempotency_key") @db.VarChar(128)
+  canonicalPayload Json                @map("canonical_payload") @db.JsonB
+  customerId       String              @map("customer_id") @db.VarChar(64)
+  status           OrderStatus         @default(queued)
+  totalCents       Int                 @map("total_cents")
+  createdAt        DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  completedAt      DateTime?           @map("completed_at") @db.Timestamptz(6)
+  failedAt         DateTime?           @map("failed_at") @db.Timestamptz(6)
+  items            OrderItem[]
+  job              Job?
+  receipt          FulfillmentReceipt?
+
+  @@map("orders")
+}
+
+model OrderItem {
+  orderId        String @map("order_id") @db.Uuid
+  sku            String
+  quantity       Int
+  unitPriceCents Int    @map("unit_price_cents")
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+  product Product @relation(fields: [sku], references: [sku], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([orderId, sku])
+  @@index([sku])
+  @@map("order_items")
+}
+
+model Job {
+  id             String    @id @default(uuid()) @db.Uuid
+  orderId        String    @unique @map("order_id") @db.Uuid
+  state          JobState  @default(pending)
+  attempts       Int       @default(0)
+  maxAttempts    Int       @default(3) @map("max_attempts")
+  nextAttemptAt  DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  claimToken     String?   @map("claim_token") @db.Uuid
+  leaseExpiresAt DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  lastError      String?   @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  deadLetteredAt DateTime? @map("dead_lettered_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("jobs")
+}
+
+model FulfillmentReceipt {
+  orderId     String   @id @map("order_id") @db.Uuid
+  completedAt DateTime @default(now()) @map("completed_at") @db.Timestamptz(6)
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@map("fulfillment_receipts")
+}
