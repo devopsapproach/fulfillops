@@ -1,6 +1,3 @@
-// Every error the API returns uses the contract's envelope:
-// { "error": { "code": "...", "message": "..." } }
-// Messages are fixed, safe strings: never stack traces, SQL or credentials.
 
 export type ErrorCode =
   | "INVALID_JSON"

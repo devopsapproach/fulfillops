@@ -5,9 +5,6 @@ export interface OrderLine {
   quantity: number;
 }
 
-// The normalized form of an order request. Duplicate SKU lines are
-// added together and items are sorted by SKU, so two requests that mean
-// the same thing produce the same canonical order.
 export interface CanonicalOrder {
   customer_id: string;
   items: OrderLine[];
@@ -47,7 +44,6 @@ export function parseIdempotencyKey(header: string | undefined): string {
 }
 
 function isValidQuantity(value: unknown): value is number {
-  // typeof excludes booleans and numeric strings; isInteger excludes 1.5.
   return (
     typeof value === "number" &&
     Number.isInteger(value) &&
@@ -56,9 +52,6 @@ function isValidQuantity(value: unknown): value is number {
   );
 }
 
-// Checks run in a fixed order so the same bad request always gets the
-// same error: structure (400), then quantities (422), then SKUs (422).
-// SKU existence is checked later against the database.
 export function parseOrderRequest(body: unknown): CanonicalOrder {
   if (!isPlainObject(body)) {
     invalidRequest("The request body must be a JSON object");
@@ -113,9 +106,7 @@ export function parseOrderRequest(body: unknown): CanonicalOrder {
   return { customer_id: customerId, items: lines };
 }
 
-// A stable string for comparing two canonical orders. PostgreSQL JSONB
-// does not keep key order, so stored payloads are rebuilt through this
-// function instead of being compared as raw JSON text.
+
 export function canonicalString(order: CanonicalOrder): string {
   return JSON.stringify({
     customer_id: order.customer_id,
