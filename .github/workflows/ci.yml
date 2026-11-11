@@ -46,7 +46,7 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
-      
+
       - name: Generate Prisma client
         run: npm run db:generate
 
