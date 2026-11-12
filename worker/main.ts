@@ -1,20 +1,113 @@
-import { apiConfig } from "../shared/config.js";
+import "dotenv/config";
+import { setTimeout as sleep } from "node:timers/promises";
+import { database } from "../shared/database.js";
+import { parseWorkerConfig } from "./config.js";
+import { claimNextJob, recoverExpiredJob } from "./job-repository.js";
+import { processJob } from "./process-job.js";
 
-const pollIntervalMs = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 500);
+const config = parseWorkerConfig(process.env);
 
-console.info(
-  `Worker process started (pollIntervalMs=${pollIntervalMs}, envPort=${apiConfig.PORT})`,
-);
+let stopping = false;
+let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
 
-const timer = setInterval(() => {
-  // Placeholder heartbeat until chimaera attaches job claiming in Checkpoint 2
-}, pollIntervalMs);
+function requestShutdown(signal: string) {
+  if (stopping) {
+    return;
+  }
 
-function shutdown(signal: string) {
-  console.info(`Worker received ${signal}, shutting down gracefully`);
-  clearInterval(timer);
-  process.exit(0);
+  stopping = true;
+
+  console.info(
+    JSON.stringify({
+      event: "worker_shutdown_requested",
+      signal,
+    }),
+  );
+
+  shutdownTimer = setTimeout(() => {
+    console.error(
+      JSON.stringify({
+        event: "worker_shutdown_timeout",
+      }),
+    );
+
+    process.exit(1);
+  }, 10000);
 }
 
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", requestShutdown);
+process.on("SIGTERM", requestShutdown);
+
+async function runWorker() {
+  console.info(
+    JSON.stringify({
+      event: "worker_started",
+      pollIntervalMs: config.pollIntervalMs,
+      leaseMs: config.leaseMs,
+    }),
+  );
+
+  try {
+    while (!stopping) {
+      try {
+        await recoverExpiredJob(database, config.retryBaseMs);
+
+        if (stopping) {
+          break;
+        }
+
+        const job = await claimNextJob(database, config.leaseMs);
+
+        if (!job) {
+          if (!stopping) {
+            await sleep(config.pollIntervalMs);
+          }
+
+          continue;
+        }
+
+        console.info(
+          JSON.stringify({
+            event: "job_claimed",
+            jobId: job.id,
+            orderId: job.orderId,
+            attempts: job.attempts,
+          }),
+        );
+
+        await processJob(database, job, config.retryBaseMs);
+      } catch {
+        console.error(
+          JSON.stringify({
+            event: "worker_operation_failed",
+          }),
+        );
+
+        if (!stopping) {
+          await sleep(Math.max(config.pollIntervalMs, 1000));
+        }
+      }
+    }
+  } finally {
+    await database.$disconnect();
+  }
+}
+
+runWorker()
+  .catch(() => {
+    console.error(
+      JSON.stringify({
+        event: "worker_stopped_with_error",
+      }),
+    );
+
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    if (shutdownTimer) {
+      clearTimeout(shutdownTimer);
+    }
+
+    process.removeListener("SIGINT", requestShutdown);
+    process.removeListener("SIGTERM", requestShutdown);
+  });
