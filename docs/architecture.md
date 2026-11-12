@@ -27,14 +27,6 @@ Zod, Vitest, Supertest, Docker Compose.
 - An order has at most one fulfillment receipt.
 - Accepted orders and idempotency mappings survive restarts.
 
-## Invariants
-
-- Stock is never negative.
-- One idempotency key identifies at most one accepted order.
-- Order, reservation, and job are committed together.
-- An order has at most one fulfillment receipt.
-- Accepted orders and idempotency mappings survive restarts.
-
 ## Transaction boundaries
 
 Order acceptance commits the order, item records, inventory reservation,
@@ -113,6 +105,18 @@ Argo CD reconciles deployment configuration from Git.
 CI validates changes and release artifacts before promotion.
 
 The single PostgreSQL instance remains a shared availability dependency.
+
+## API Responsability
+
+<!-- Jaimie will define this -->
+
+## Worker Responsability
+
+- Preserve the existing reservation
+- Move it through processing to completion or failure
+- Preserve the accepted total
+- Claim and process that job
+- Respect the persisted max_attempts
 
 ## Architecture
 
