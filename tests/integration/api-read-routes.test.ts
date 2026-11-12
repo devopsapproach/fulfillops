@@ -71,4 +71,56 @@ describe("read routes against PostgreSQL", () => {
     expect(response.status).toBe(404);
     expect(response.body.error.code).toBe("SKU_NOT_FOUND");
   });
+
+  it("returns 503 when a required table is missing", async () => {
+    const rollback = new Error("ROLLBACK_TEST_TRANSACTION");
+
+    await expect(
+      database.$transaction(async (transaction) => {
+        await transaction.$executeRaw`
+        ALTER TABLE public.fulfillment_receipts
+        RENAME TO fulfillment_receipts_readiness_test
+      `;
+
+        const transactionApp = createApp({
+          database: transaction,
+        });
+
+        const response = await request(transactionApp).get("/health/ready");
+
+        expect(response.status).toBe(503);
+        expect(response.body).toEqual({ status: "not_ready" });
+
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
+
+  it("returns 503 when a required migration is unfinished", async () => {
+    const rollback = new Error("ROLLBACK_TEST_TRANSACTION");
+
+    await expect(
+      database.$transaction(async (transaction) => {
+        const changedRows = await transaction.$executeRaw`
+        UPDATE public._prisma_migrations
+        SET finished_at = NULL
+        WHERE migration_name = '20261111104128_create_domain_tables'
+          AND rolled_back_at IS NULL
+      `;
+
+        expect(changedRows).toBeGreaterThan(0);
+
+        const transactionApp = createApp({
+          database: transaction,
+        });
+
+        const response = await request(transactionApp).get("/health/ready");
+
+        expect(response.status).toBe(503);
+        expect(response.body).toEqual({ status: "not_ready" });
+
+        throw rollback;
+      }),
+    ).rejects.toBe(rollback);
+  });
 });
