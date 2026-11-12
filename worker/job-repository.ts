@@ -7,6 +7,8 @@ export interface ClaimedJob {
   claimToken: string;
   attempts: number;
   maxAttempts: number;
+
+  completeJob(database: PrismaClient, job: ClaimedJob): Promise<boolean>;
 }
 
 export async function claimNextJob(
