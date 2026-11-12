@@ -406,3 +406,43 @@ additional evidence beyond the public checker.
 
 See `docs/ADR-001.md` for the agreed schema, states, transaction boundaries,
 interfaces, configuration, and ownership.
+
+## Start the worker
+
+Complete database setup before starting the worker.
+
+For development, run these commands in separate terminals:
+
+```bash
+# Terminal 1
+npm run dev:api
+```
+
+```bash
+# Terminal 2
+npm run dev:worker
+```
+
+For compiled execution:
+
+```bash
+npm run db:generate
+npm run build
+```
+
+Then use separate terminals:
+
+```bash
+npm run start:api
+```
+
+```bash
+npm run start:worker
+```
+
+The API and worker must connect to the same application database.
+
+Starting the worker does not start the HTTP API.
+
+Stop each process with Ctrl+C. The worker allows a bounded shutdown
+period for in-flight work.
