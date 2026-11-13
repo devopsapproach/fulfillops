@@ -1,3 +1,8 @@
+x-app-env: &app-env
+  NODE_ENV: ${NODE_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-fulfillops}:${POSTGRES_PASSWORD:-CHANGE_ME}@db:5432/${POSTGRES_DB:-fulfillops_dev}
+
 services:
   db:
     image: postgres:16.6-alpine
@@ -23,21 +28,35 @@ services:
       retries: 10
       start_period: 5s
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    image: fulfillops-migrate:${IMAGE_TAG:-local}
+    container_name: fulfillops-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+
   api:
     build:
       context: .
       dockerfile: Dockerfile
       target: runtime
+    image: fulfillops:${IMAGE_TAG:-local}
     container_name: fulfillops-api
     restart: unless-stopped
+    init: true
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      <<: *app-env
       PORT: 8080
-      DATABASE_URL: postgresql://${POSTGRES_USER:-fulfillops}:${POSTGRES_PASSWORD:-CHANGE_ME}@db:5432/${POSTGRES_DB:-fulfillops_dev}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "${PORT:-8080}:8080"
     command: ["node", "dist/api/server.js"]
@@ -47,32 +66,36 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:8080/health/live').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+          "fetch('http://127.0.0.1:8080/health/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
         ]
       interval: 5s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 10s
+    stop_grace_period: 30s
 
   worker:
     build:
       context: .
       dockerfile: Dockerfile
       target: runtime
+    image: fulfillops:${IMAGE_TAG:-local}
     container_name: fulfillops-worker
     restart: unless-stopped
+    init: true
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      api:
+        condition: service_started
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-fulfillops}:${POSTGRES_PASSWORD:-CHANGE_ME}@db:5432/${POSTGRES_DB:-fulfillops_dev}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
+      <<: *app-env
       WORKER_POLL_INTERVAL_MS: ${WORKER_POLL_INTERVAL_MS:-500}
       WORKER_LEASE_MS: ${WORKER_LEASE_MS:-10000}
       WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-3}
       WORKER_RETRY_BASE_MS: ${WORKER_RETRY_BASE_MS:-1000}
     command: ["node", "dist/worker/main.js"]
+    stop_grace_period: 30s
 
 volumes:
   pgdata:
