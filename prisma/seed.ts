@@ -5,11 +5,15 @@ async function seed() {
   const dbUrl = process.env.DATABASE_URL || "";
 
   if (process.env.NODE_ENV === "production") {
-    throw new Error("ABORTED: Seeding is strictly prohibited when NODE_ENV=production.");
+    throw new Error(
+      "ABORTED: Seeding is strictly prohibited when NODE_ENV=production.",
+    );
   }
 
   if (!dbUrl.includes("localhost") && !dbUrl.includes("127.0.0.1")) {
-    throw new Error("ABORTED: Target DATABASE_URL does not point to a local host.");
+    throw new Error(
+      "ABORTED: Target DATABASE_URL does not point to a local host.",
+    );
   }
 
   try {
@@ -25,8 +29,8 @@ async function seed() {
           where: { sku: p.sku },
           update: { unitPriceCents: p.unitPriceCents, available: p.available },
           create: p,
-        })
-      )
+        }),
+      ),
     );
 
     console.info("Catalog seed complete. Deterministic values enforced.");
@@ -36,6 +40,8 @@ async function seed() {
 }
 
 seed().catch((error) => {
-  console.error(error instanceof Error ? error.message : "Catalog seeding failed.");
+  console.error(
+    error instanceof Error ? error.message : "Catalog seeding failed.",
+  );
   process.exitCode = 1;
 });

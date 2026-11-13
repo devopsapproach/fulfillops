@@ -6,13 +6,17 @@ async function resetTestData() {
   const connectionString = process.env.TEST_DATABASE_URL || "";
 
   if (process.env.NODE_ENV === "production") {
-    throw new Error("ABORTED: Resetting data is strictly prohibited in production.");
+    throw new Error(
+      "ABORTED: Resetting data is strictly prohibited in production.",
+    );
   }
 
   try {
     const url = new URL(connectionString);
     if (url.pathname !== "/fulfillops_test") {
-      throw new Error("ABORTED: TEST_DATABASE_URL must target the /fulfillops_test database.");
+      throw new Error(
+        "ABORTED: TEST_DATABASE_URL must target the /fulfillops_test database.",
+      );
     }
   } catch {
     throw new Error("ABORTED: Invalid TEST_DATABASE_URL format.");
@@ -39,13 +43,17 @@ async function resetTestData() {
       ],
     });
 
-    console.info("Test database reset complete. All transactional data purged.");
+    console.info(
+      "Test database reset complete. All transactional data purged.",
+    );
   } finally {
     await database.$disconnect();
   }
 }
 
 resetTestData().catch((error) => {
-  console.error(error instanceof Error ? error.message : "Test data reset failed.");
+  console.error(
+    error instanceof Error ? error.message : "Test data reset failed.",
+  );
   process.exitCode = 1;
 });
