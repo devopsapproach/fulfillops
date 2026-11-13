@@ -108,15 +108,16 @@ The single PostgreSQL instance remains a shared availability dependency.
 
 ## API Responsability
 
-| API responsibility | How it is done |
-|---|---|
-| Reserve inventory during acceptance | Conditional `UPDATE products ... WHERE available >= quantity`, one SKU at a time in sorted order, inside the acceptance transaction |
-| Save the order with `status = queued` | `INSERT INTO orders` claims the idempotency key (`ON CONFLICT DO NOTHING`); the status defaults to `queued` |
-| Save captured item prices and `total_cents` | Prices are read from `products` and copied into `order_items.unit_price_cents`; `total_cents` is their sum |
-| Insert one `pending` job | One `jobs` row per order (`order_id` is unique), created in the same transaction |
-| Set the job's retry budget | `max_attempts` is set to `JOB_MAX_ATTEMPTS` (3) when the job is inserted |
+| API responsibility                          | How it is done                                                                                                                      |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Reserve inventory during acceptance         | Conditional `UPDATE products ... WHERE available >= quantity`, one SKU at a time in sorted order, inside the acceptance transaction |
+| Save the order with `status = queued`       | `INSERT INTO orders` claims the idempotency key (`ON CONFLICT DO NOTHING`); the status defaults to `queued`                         |
+| Save captured item prices and `total_cents` | Prices are read from `products` and copied into `order_items.unit_price_cents`; `total_cents` is their sum                          |
+| Insert one `pending` job                    | One `jobs` row per order (`order_id` is unique), created in the same transaction                                                    |
+| Set the job's retry budget                  | `max_attempts` is set to `JOB_MAX_ATTEMPTS` (3) when the job is inserted                                                            |
 
 All five steps commit together or roll back together, so an order never exists without its reservation and its job.
+
 ## Worker responsibilities
 
 The worker processes persisted jobs independently of the HTTP API.
