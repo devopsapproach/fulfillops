@@ -3,9 +3,12 @@ import type { PrismaClient } from "../shared/generated/prisma/client.js";
 import { ApiError, errorBody } from "./errors.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { healthRouter } from "./routes/health.js";
+import { ordersRouter } from "./routes/orders.js";
 
-export type Database = Pick<PrismaClient, "product" | "$queryRaw">;
-
+export type Database = Pick<
+  PrismaClient,
+  "product" | "order" | "$queryRaw" | "$transaction"
+>;
 export interface AppDependencies {
   database: Database;
 }
@@ -77,6 +80,7 @@ export function createApp({ database }: AppDependencies) {
 
   app.use(healthRouter(database));
   app.use(catalogRouter(database));
+  app.use(ordersRouter(database));
 
   app.use((_request, response) => {
     response
