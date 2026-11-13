@@ -17,6 +17,8 @@ export interface OrderView {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const JOB_MAX_ATTEMPTS = 3;
+
 function storedOrder(payload: unknown): CanonicalOrder {
   return (
     typeof payload === "string" ? JSON.parse(payload) : payload
@@ -107,7 +109,8 @@ export async function acceptOrder(
       }
 
       await tx.$executeRaw`
-        INSERT INTO jobs (id, order_id) VALUES (${randomUUID()}::uuid, ${orderId}::uuid)
+        INSERT INTO jobs (id, order_id, state, max_attempts)
+        VALUES (${randomUUID()}::uuid, ${orderId}::uuid, 'pending', ${JOB_MAX_ATTEMPTS})
       `;
 
       return { orderId, replayed: false };
