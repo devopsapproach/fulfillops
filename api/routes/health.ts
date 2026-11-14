@@ -43,6 +43,7 @@ export function healthRouter(database: Database) {
               FROM public._prisma_migrations
               WHERE finished_at IS NULL
                 AND rolled_back_at IS NULL
+          ) AS ready
         `,
         READINESS_TIMEOUT_MS,
       );

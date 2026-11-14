@@ -18,7 +18,7 @@ jobs:
         image: postgres:16.6-alpine
         env:
           POSTGRES_USER: fulfillops_test
-          POSTGRES_PASSWORD: test_password
+          POSTGRES_PASSWORD: CHANGE_ME
           POSTGRES_DB: fulfillops_test
         ports:
           - 5432:5432
@@ -31,8 +31,8 @@ jobs:
     env:
       NODE_ENV: test
       PORT: 8080
-      DATABASE_URL: postgresql://fulfillops_test:test_password@localhost:5432/fulfillops_test
-      TEST_DATABASE_URL: postgresql://fulfillops_test:test_password@localhost:5432/fulfillops_test
+      DATABASE_URL: postgresql://fulfillops_test:CHANGE_ME@localhost:5432/fulfillops_test
+      TEST_DATABASE_URL: postgresql://fulfillops_test:CHANGE_ME@localhost:5432/fulfillops_test
 
     steps:
       - name: Checkout repository
