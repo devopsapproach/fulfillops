@@ -1,17 +1,17 @@
 name: CI
-
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
-
 permissions:
   contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  verify-and-build:
-    name: Lint, Typecheck, Test & Build
+  quality:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -20,14 +20,10 @@ jobs:
           POSTGRES_USER: fulfillops_test
           POSTGRES_PASSWORD: CHANGE_ME
           POSTGRES_DB: fulfillops_test
-        ports:
-          - 5432:5432
+        ports: ["5432:5432"]
         options: >-
           --health-cmd="pg_isready -U fulfillops_test -d fulfillops_test"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=10
-
+          --health-interval=5s --health-timeout=5s --health-retries=20
     env:
       NODE_ENV: test
       PORT: 8080
@@ -35,38 +31,77 @@ jobs:
       TEST_DATABASE_URL: postgresql://fulfillops_test:CHANGE_ME@localhost:5432/fulfillops_test
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version-file: ".nvmrc"
-          cache: "npm"
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate
+      - run: npm run db:migrate:deploy
+      - run: npm run check
+      - run: npm run test:integration
 
-      - name: Install locked dependencies
-        run: npm ci
-
-      - name: Generate Prisma client
-        run: npm run db:generate
-
-      - name: Apply test database migrations
-        run: npm run db:migrate:deploy
-
-      - name: Run database integration tests
-        run: npm run test:integration
-
-      - name: Run static checks, unit tests, and TypeScript build
-        run: npm run check
-
-      - name: Build multistage Docker image with immutable SHA tag
-        run: docker build --tag fulfillops:${{ github.sha }} .
-
-      - name: Verify container runs as non-root user (WP5 gate)
+  delivery:
+    needs: quality
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RUNTIME_IMAGE: fulfillops:${{ github.sha }}
+      MIGRATION_IMAGE: fulfillops-migrate:${{ github.sha }}
+      TRIVY_IMAGE: ${{ vars.TRIVY_IMAGE }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build both artifacts once
         run: |
-          CONTAINER_UID=$(docker run --rm --entrypoint id fulfillops:${{ github.sha }} -u)
-          echo "Container UID: ${CONTAINER_UID}"
-          if [ "${CONTAINER_UID}" -eq 0 ]; then
-            echo "Error: Container is running as root (UID 0)"
-            exit 1
-          fi
+          docker build --target runtime -t "$RUNTIME_IMAGE" .
+          docker build --target migrate -t "$MIGRATION_IMAGE" .
+          test "$(docker run --rm --entrypoint id "$RUNTIME_IMAGE" -u)" -ne 0
+      - name: Two-API acceptance
+        id: acceptance
+        run: bash scripts/ci/run-stack.sh acceptance
+      - name: Full public checker on fresh dataset
+        id: checker
+        if: ${{ !cancelled() && steps.acceptance.outcome != 'skipped' }}
+        run: bash scripts/ci/run-stack.sh checker
+      - name: SBOM and enforced vulnerability policy
+        id: security
+        if: ${{ !cancelled() && steps.acceptance.outcome != 'skipped' }}
+        run: bash scripts/ci/scan-images.sh
+      - name: Publish tested images on main only
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_ACTOR: ${{ github.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          owner="${OWNER,,}"
+          runtime="ghcr.io/$owner/fulfillops:${GITHUB_SHA}"
+          migration="ghcr.io/$owner/fulfillops-migrate:${GITHUB_SHA}"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          docker tag "$RUNTIME_IMAGE" "$runtime"
+          docker tag "$MIGRATION_IMAGE" "$migration"
+          docker push "$runtime"
+          docker push "$migration"
+          mkdir -p artifacts/release
+          docker pull "$runtime"
+          docker pull "$migration"
+          docker image inspect "$runtime" --format '{{json .RepoDigests}}' > artifacts/release/runtime-digests.json
+          docker image inspect "$migration" --format '{{json .RepoDigests}}' > artifacts/release/migration-digests.json
+          printf '%s\n' "$GITHUB_SHA" > artifacts/release/commit.txt
+      - name: Upload evidence even when a gate fails
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: delivery-evidence-${{ github.sha }}
+          path: |
+            artifacts/acceptance/
+            artifacts/checker/
+            artifacts/security/*.json
+            artifacts/security/*.txt
+            artifacts/release/
+          if-no-files-found: warn

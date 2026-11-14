@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: fulfillops-runtime
+    newName: ghcr.io/devopsapproach/fulfillops
+    digest: sha256:REPLACE_WITH_RUNTIME_DIGEST
+  - name: fulfillops-migration
+    newName: ghcr.io/devopsapproach/fulfillops-migrate
+    digest: sha256:REPLACE_WITH_MIGRATION_DIGEST
