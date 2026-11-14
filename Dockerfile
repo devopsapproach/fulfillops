@@ -16,6 +16,10 @@ FROM source AS migrate
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
+
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost/dummy" \
+    npx prisma generate
+
 CMD ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed"]
 
 FROM source AS builder
