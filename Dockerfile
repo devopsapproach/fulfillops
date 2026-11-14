@@ -20,7 +20,7 @@ RUN apt-get update \
 RUN DATABASE_URL="postgresql://dummy:dummy@localhost/dummy" \
     npx prisma generate
 
-CMD ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed"]
+CMD ["npx", "prisma", "migrate", "deploy"]
 
 FROM source AS builder
 # The prisma.config.ts file will parse it, satisfy its env() check, and successfully generate the client.
