@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { Database } from "./app.js";
 import { ApiError } from "./errors.js";
 import { canonicalString, type CanonicalOrder } from "./validation.js";
+import { metricsRegistry } from "./metrics.js";
 
 export interface AcceptedOrder {
   orderId: string;
@@ -32,7 +33,7 @@ export async function acceptOrder(
 ): Promise<AcceptedOrder> {
   const payload = canonicalString(order);
 
-  return database.$transaction(
+  const accepted = await database.$transaction(
     async (tx) => {
       const skus = order.items.map((line) => line.sku);
       const products = await tx.$queryRaw<
@@ -117,6 +118,12 @@ export async function acceptOrder(
     },
     { maxWait: 5000, timeout: 10000 },
   );
+
+  if (!accepted.replayed) {
+    metricsRegistry.recordOrderCreated();
+  }
+
+  return accepted;
 }
 
 export async function findOrder(

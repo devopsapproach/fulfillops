@@ -3,6 +3,11 @@ export class MetricsRegistry {
   private durationBuckets = new Map<string, number[]>();
   private durationSum = new Map<string, number>();
   private durationCount = new Map<string, number>();
+  private ordersCreatedTotal = 0;
+
+  public recordOrderCreated(): void {
+    this.ordersCreatedTotal += 1;
+  }
 
   // Standard latency bounds for web APIs in seconds
   private readonly buckets = [0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
@@ -61,6 +66,10 @@ export class MetricsRegistry {
     output += `# TYPE fulfillops_http_requests_total counter\n`;
     for (const [labels, count] of this.requestsTotal.entries()) {
       output += `fulfillops_http_requests_total{${labels}} ${count}\n`;
+      output +=
+        "# HELP fulfillops_orders_created_total New orders committed by this API process\n";
+      output += "# TYPE fulfillops_orders_created_total counter\n";
+      output += `fulfillops_orders_created_total ${this.ordersCreatedTotal}\n\n`;
     }
 
     // Histogram
