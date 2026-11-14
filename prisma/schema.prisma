@@ -28,7 +28,7 @@ enum JobState {
 model Product {
   sku            String      @id
   unitPriceCents Int         @map("unit_price_cents")
-  available      Int
+  available      Int    
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
   orderItems     OrderItem[]
@@ -85,6 +85,9 @@ model Job {
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Restrict, onUpdate: Restrict)
 
+  // Prevent sequential table scans
+  @@index([state, nextAttemptAt, id])
+  @@index([state, leaseExpiresAt, id])
   @@map("jobs")
 }
 
