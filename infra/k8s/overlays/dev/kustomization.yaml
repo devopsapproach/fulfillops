@@ -5,10 +5,10 @@ resources:
 images:
   - name: fulfillops-runtime
     newName: fulfillops
-    newTag: dev-3d83add
+    newTag: dev-204651d
   - name: fulfillops-migration
     newName: fulfillops-migrate
-    newTag: dev-3d83add
+    newTag: dev-204651d
 patches:
   - target:
       kind: Deployment
