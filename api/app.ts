@@ -1,8 +1,11 @@
 import express, { type ErrorRequestHandler } from "express";
 import type { PrismaClient } from "../shared/generated/prisma/client.js";
+import { logger } from "../shared/logger.js";
 import { ApiError, errorBody } from "./errors.js";
+import { observeMetrics } from "./metrics.js";
 import { catalogRouter } from "./routes/catalog.js";
 import { healthRouter } from "./routes/health.js";
+import { metricsRouter } from "./routes/metrics.js";
 import { ordersRouter } from "./routes/orders.js";
 
 export type Database = Pick<
@@ -63,9 +66,7 @@ const errorHandler: ErrorRequestHandler = (error, _request, response, next) => {
   }
 
   const name = error instanceof Error ? error.name : "UnknownError";
-  console.error(
-    JSON.stringify({ level: "error", event: "unhandled_error", name }),
-  );
+  logger.error({ event: "unhandled_error", name }, error);
 
   response
     .status(500)
@@ -77,6 +78,12 @@ export function createApp({ database }: AppDependencies) {
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: BODY_LIMIT }));
+
+  // Expose metrics BEFORE the observer to avoid recursive scraping pollution
+  app.use("/metrics", metricsRouter);
+  
+  // Start the observation timer for all subsequent business routes
+  app.use(observeMetrics);
 
   app.use(healthRouter(database));
   app.use(catalogRouter(database));
