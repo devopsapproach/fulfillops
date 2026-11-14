@@ -1,0 +1,30 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../base
+images:
+  - name: fulfillops-runtime
+    newName: fulfillops
+    newTag: dev-3d83add
+  - name: fulfillops-migration
+    newName: fulfillops-migrate
+    newTag: dev-3d83add
+patches:
+  - target:
+      kind: Deployment
+      name: api
+    patch:
+      "- op: add\n  path: /spec/template/spec/containers/0/imagePullPolicy\n  value:\
+      \ Never"
+  - target:
+      kind: Deployment
+      name: worker
+    patch:
+      "- op: add\n  path: /spec/template/spec/containers/0/imagePullPolicy\n  value:\
+      \ Never"
+  - target:
+      kind: Job
+      name: fulfillops-migrate
+    patch:
+      "- op: add\n  path: /spec/template/spec/containers/0/imagePullPolicy\n  value:\
+      \ Never"

@@ -1,0 +1,73 @@
+x-env: &env
+  NODE_ENV: test
+  DATABASE_URL: postgresql://fulfillops:ci_only_password@db:5432/fulfillops_test
+  PORT: "8080"
+  WORKER_POLL_INTERVAL_MS: "100"
+  WORKER_LEASE_MS: "10000"
+  WORKER_RETRY_BASE_MS: "1000"
+
+x-api: &api
+  image: ${RUNTIME_IMAGE:?RUNTIME_IMAGE is required}
+  command: ["node", "dist/api/server.js"]
+  environment: *env
+  init: true
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "node",
+        "-e",
+        "fetch('http://127.0.0.1:8080/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+      ]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+  stop_grace_period: 30s
+
+x-worker: &worker
+  image: ${RUNTIME_IMAGE:?RUNTIME_IMAGE is required}
+  command: ["node", "dist/worker/main.js"]
+  environment: *env
+  init: true
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+  stop_grace_period: 30s
+
+services:
+  db:
+    image: postgres:16.6-alpine
+    environment:
+      POSTGRES_USER: fulfillops
+      POSTGRES_PASSWORD: ci_only_password
+      POSTGRES_DB: fulfillops_test
+    volumes:
+      - testdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fulfillops -d fulfillops_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  migrate:
+    image: ${MIGRATION_IMAGE:?MIGRATION_IMAGE is required}
+    environment: *env
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+  api-a:
+    <<: *api
+    ports: ["127.0.0.1:18080:8080"]
+  api-b:
+    <<: *api
+    ports: ["127.0.0.1:18081:8080"]
+  worker-a:
+    <<: *worker
+  worker-b:
+    <<: *worker
+
+volumes:
+  testdata:

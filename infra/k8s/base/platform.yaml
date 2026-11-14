@@ -1,0 +1,92 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fulfillops-lab
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fulfillops-config
+  annotations:
+    argocd.argoproj.io/sync-wave: "-3"
+data:
+  NODE_ENV: production
+  PORT: "8080"
+  WORKER_POLL_INTERVAL_MS: "500"
+  WORKER_LEASE_MS: "10000"
+  WORKER_RETRY_BASE_MS: "1000"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  clusterIP: None
+  selector:
+    app: fulfillops-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: db
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  serviceName: db
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fulfillops-db
+  template:
+    metadata:
+      labels:
+        app: fulfillops-db
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: postgres:16.6-alpine
+          env:
+            - name: POSTGRES_USER
+              value: fulfillops
+            - name: POSTGRES_DB
+              value: fulfillops_test
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: fulfillops-db
+                  key: POSTGRES_PASSWORD
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+                ["pg_isready", "-U", "fulfillops", "-d", "fulfillops_test"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi

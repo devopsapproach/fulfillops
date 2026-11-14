@@ -15,3 +15,5 @@ generated/
 !.env.example
 
 NOTES.md
+
+artifacts/
