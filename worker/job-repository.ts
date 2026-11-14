@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { logger } from "../shared/logger.js";
+
 import type {
   Prisma,
   PrismaClient,
@@ -17,6 +19,10 @@ export interface ClaimedJob {
   claimToken: string;
   attempts: number;
   maxAttempts: number;
+}
+
+interface ClaimedJobRow extends ClaimedJob {
+  updatedAt: Date;
 }
 
 export async function claimNextJob(
@@ -45,7 +51,7 @@ export async function claimNextJob(
 
     const claimToken = randomUUID();
 
-    const claimed = await transaction.$queryRaw<ClaimedJob[]>`
+    const claimed = await transaction.$queryRaw<ClaimedJobRow[]>`
       UPDATE jobs
       SET state = 'claimed',
           claim_token = ${claimToken}::uuid,
@@ -60,8 +66,11 @@ export async function claimNextJob(
         order_id AS "orderId",
         claim_token AS "claimToken",
         attempts,
-        max_attempts AS "maxAttempts"
+        max_attempts AS "maxAttempts",
+        updated_at AS "updatedAt"
     `;
+
+    const claimedRow = claimed[0]!;
 
     const updatedOrders = await transaction.order.updateMany({
       where: {
@@ -70,7 +79,7 @@ export async function claimNextJob(
       },
       data: {
         status: "processing",
-        updatedAt: new Date(),
+        updatedAt: claimedRow.updatedAt,
       },
     });
 
@@ -78,7 +87,13 @@ export async function claimNextJob(
       throw new Error("Job and order states are inconsistent");
     }
 
-    return claimed[0]!;
+    return {
+      id: claimedRow.id,
+      orderId: claimedRow.orderId,
+      claimToken: claimedRow.claimToken,
+      attempts: claimedRow.attempts,
+      maxAttempts: claimedRow.maxAttempts,
+    };
   });
 }
 
@@ -171,10 +186,13 @@ async function rescheduleOrFail(
 ): Promise<void> {
   const exhausted = job.attempts >= job.maxAttempts;
 
-  const retryDelayMs = Math.min(
-    30000,
-    retryBaseMs * 2 ** Math.min(Math.max(job.attempts - 1, 0), 20),
-  );
+  const retryDelayMs =
+    errorCode === "LEASE_EXPIRED"
+      ? 0
+      : Math.min(
+          30000,
+          retryBaseMs * 2 ** Math.min(Math.max(job.attempts - 1, 0), 20),
+        );
 
   const updatedOrders = await transaction.order.updateMany({
     where: {
@@ -263,22 +281,17 @@ export async function failJob(
     return false;
   }
 
-  console.info(
-    JSON.stringify({
-      event:
-        result.attempts >= result.maxAttempts
-          ? "job_dead_lettered"
-          : "job_retry_scheduled",
-      jobId: result.id,
-      orderId: result.orderId,
-      attempts: result.attempts,
-    }),
-  );
+  logger.info({
+    event:
+      result.attempts >= result.maxAttempts
+        ? "job_dead_lettered"
+        : "job_retry_scheduled",
+    jobId: result.id,
+    orderId: result.orderId,
+    attempts: result.attempts,
+  });
 
   return true;
-
-  // true when it commited a retry or final failure,
-  // false when the worker no longer owns a valid claim
 }
 
 export async function recoverExpiredJob(
@@ -341,17 +354,14 @@ export async function recoverExpiredJob(
     return false;
   }
 
-  console.info(
-    JSON.stringify({
-      event: "lease_recovered",
-      jobId: result.id,
-      orderId: result.orderId,
-      attempts: result.attempts,
-      outcome:
-        result.attempts >= result.maxAttempts ? "dead_letter" : "pending",
-    }),
-  );
+  logger.info({
+    event: "lease_recovered",
+    jobId: result.id,
+    orderId: result.orderId,
+    attempts: result.attempts,
+    outcome:
+      result.attempts >= result.maxAttempts ? "dead_letter" : "pending",
+  });
 
   return true;
 }
-// fulfillment_receipts -> jobs -> order_items -> orders -> products

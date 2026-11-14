@@ -1,4 +1,5 @@
 import type { PrismaClient } from "../shared/generated/prisma/client.js";
+import { logger } from "../shared/logger.js";
 import { completeJob, failJob, type ClaimedJob } from "./job-repository.js";
 
 interface FulfillmentOrder {
@@ -50,13 +51,11 @@ export async function processJob(
     const recorded = await failJob(database, job, retryBaseMs);
 
     if (!recorded) {
-      console.info(
-        JSON.stringify({
-          event: "job_result_abandoned",
-          jobId: job.id,
-          orderId: job.orderId,
-        }),
-      );
+      logger.info({
+        event: "job_result_abandoned",
+        jobId: job.id,
+        orderId: job.orderId,
+      });
     }
 
     return;
@@ -65,12 +64,10 @@ export async function processJob(
   // Completion failures propagate because the commit outcome may be unknown.
   const completed = await completeJob(database, job);
 
-  console.info(
-    JSON.stringify({
-      event: completed ? "job_completed" : "job_result_abandoned",
-      jobId: job.id,
-      orderId: job.orderId,
-      attempts: job.attempts,
-    }),
-  );
+  logger.info({
+    event: completed ? "job_completed" : "job_result_abandoned",
+    jobId: job.id,
+    orderId: job.orderId,
+    attempts: job.attempts,
+  });
 }

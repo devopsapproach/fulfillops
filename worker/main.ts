@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { setTimeout as sleep } from "node:timers/promises";
 import { database } from "../shared/database.js";
+import { logger } from "../shared/logger.js";
 import { parseWorkerConfig } from "./config.js";
 import { claimNextJob, recoverExpiredJob } from "./job-repository.js";
 import { processJob } from "./process-job.js";
@@ -17,19 +18,15 @@ function requestShutdown(signal: string) {
 
   stopping = true;
 
-  console.info(
-    JSON.stringify({
-      event: "worker_shutdown_requested",
-      signal,
-    }),
-  );
+  logger.info({
+    event: "worker_shutdown_requested",
+    signal,
+  });
 
   shutdownTimer = setTimeout(() => {
-    console.error(
-      JSON.stringify({
-        event: "worker_shutdown_timeout",
-      }),
-    );
+    logger.error({
+      event: "worker_shutdown_timeout",
+    });
 
     process.exit(1);
   }, 10000);
@@ -39,13 +36,11 @@ process.on("SIGINT", requestShutdown);
 process.on("SIGTERM", requestShutdown);
 
 async function runWorker() {
-  console.info(
-    JSON.stringify({
-      event: "worker_started",
-      pollIntervalMs: config.pollIntervalMs,
-      leaseMs: config.leaseMs,
-    }),
-  );
+  logger.info({
+    event: "worker_started",
+    pollIntervalMs: config.pollIntervalMs,
+    leaseMs: config.leaseMs,
+  });
 
   try {
     while (!stopping) {
@@ -66,21 +61,20 @@ async function runWorker() {
           continue;
         }
 
-        console.info(
-          JSON.stringify({
-            event: "job_claimed",
-            jobId: job.id,
-            orderId: job.orderId,
-            attempts: job.attempts,
-          }),
-        );
+        logger.info({
+          event: "job_claimed",
+          jobId: job.id,
+          orderId: job.orderId,
+          attempts: job.attempts,
+        });
 
         await processJob(database, job, config.retryBaseMs);
-      } catch {
-        console.error(
-          JSON.stringify({
+      } catch (error) {
+        logger.error(
+          {
             event: "worker_operation_failed",
-          }),
+          },
+          error,
         );
 
         if (!stopping) {
@@ -94,11 +88,12 @@ async function runWorker() {
 }
 
 runWorker()
-  .catch(() => {
-    console.error(
-      JSON.stringify({
+  .catch((error) => {
+    logger.error(
+      {
         event: "worker_stopped_with_error",
-      }),
+      },
+      error,
     );
 
     process.exitCode = 1;
