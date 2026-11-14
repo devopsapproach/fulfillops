@@ -10,7 +10,7 @@ spec:
 
   source:
     repoURL: https://github.com/devopsapproach/fulfillops.git
-    targetRevision: feat/t19-ci-acceptance
+    targetRevision: chore/refresh-dev-deployment
     path: infra/k8s/overlays/dev
 
   destination:

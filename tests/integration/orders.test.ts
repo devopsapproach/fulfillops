@@ -61,6 +61,22 @@ afterAll(async () => {
   await database.$disconnect();
 });
 
+async function ordersCreatedCounter(): Promise<number> {
+  const response = await request(app).get("/metrics");
+
+  expect(response.status).toBe(200);
+
+  const match = response.text.match(
+    /^fulfillops_orders_created_total ([0-9]+)$/m,
+  );
+
+  if (!match) {
+    throw new Error("Missing orders-created counter sample");
+  }
+
+  return Number(match[1]);
+}
+
 describe("POST /api/v1/orders", () => {
   it("accepts an order, reserves stock and creates one pending job", async () => {
     const a = await product(5, 1299);
@@ -259,5 +275,64 @@ describe("GET /api/v1/orders/:orderId", () => {
       expect(response.status).toBe(404);
       expect(response.body.error.code).toBe("ORDER_NOT_FOUND");
     }
+  });
+});
+
+describe("order creation metrics", () => {
+  it("increments after creating a persisted order", async () => {
+    const sku = await product(5);
+    const before = await ordersCreatedCounter();
+
+    const response = await postOrder(key(), {
+      customer_id: "CUST-METRICS",
+      items: [{ sku, quantity: 1 }],
+    });
+
+    expect(response.status).toBe(202);
+
+    const persisted = await database.order.findUnique({
+      where: { id: response.body.order_id },
+    });
+
+    expect(persisted).not.toBeNull();
+    expect(await ordersCreatedCounter()).toBe(before + 1);
+  });
+
+  it("does not increment for an idempotent replay", async () => {
+    const sku = await product(5);
+    const idempotencyKey = key();
+    const body = {
+      customer_id: "CUST-METRICS",
+      items: [{ sku, quantity: 1 }],
+    };
+
+    const first = await postOrder(idempotencyKey, body);
+    expect(first.status).toBe(202);
+
+    const beforeReplay = await ordersCreatedCounter();
+
+    const replay = await postOrder(idempotencyKey, body);
+
+    expect(replay.status).toBe(202);
+    expect(replay.body.order_id).toBe(first.body.order_id);
+    expect(await ordersCreatedCounter()).toBe(beforeReplay);
+  });
+
+  it("does not increment when the transaction rolls back", async () => {
+    const sku = await product(0);
+    const idempotencyKey = key();
+    const before = await ordersCreatedCounter();
+
+    const response = await postOrder(idempotencyKey, {
+      customer_id: "CUST-METRICS",
+      items: [{ sku, quantity: 1 }],
+    });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error.code).toBe("OUT_OF_STOCK");
+
+    expect(await database.order.count({ where: { idempotencyKey } })).toBe(0);
+
+    expect(await ordersCreatedCounter()).toBe(before);
   });
 });

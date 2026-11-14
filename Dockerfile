@@ -16,7 +16,11 @@ FROM source AS migrate
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl \
     && rm -rf /var/lib/apt/lists/*
-CMD ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed"]
+
+RUN DATABASE_URL="postgresql://dummy:dummy@localhost/dummy" \
+    npx prisma generate
+
+CMD ["npx", "prisma", "migrate", "deploy"]
 
 FROM source AS builder
 # The prisma.config.ts file will parse it, satisfy its env() check, and successfully generate the client.

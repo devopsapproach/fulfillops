@@ -359,8 +359,7 @@ export async function recoverExpiredJob(
     jobId: result.id,
     orderId: result.orderId,
     attempts: result.attempts,
-    outcome:
-      result.attempts >= result.maxAttempts ? "dead_letter" : "pending",
+    outcome: result.attempts >= result.maxAttempts ? "dead_letter" : "pending",
   });
 
   return true;

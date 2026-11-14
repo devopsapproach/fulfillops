@@ -1,448 +1,254 @@
 # FulfillOps
 
-FulfillOps is an order-processing backend built with Node.js,
-TypeScript, Express, and PostgreSQL.
+FulfillOps is an order fulfillment API built with Node.js, TypeScript, Express,
+Prisma and PostgreSQL 16. The API reserves stock and inserts the order, its
+items and a durable job in one transaction. A separate worker claims the job
+and records fulfillment. Reusing an idempotency key with the same payload
+returns the original order without another reservation.
 
-The completed application will accept orders, reserve inventory atomically,
-and process persisted jobs through a separate worker.
+## Run locally
 
-## Current foundation
-
-The repository contains:
-
-- TypeScript configuration, quality checks, and build commands.
-- An Express API with a liveness endpoint.
-- PostgreSQL 16 through Docker Compose.
-- Prisma models and SQL migrations for products, orders, order items,
-  jobs, and fulfillment receipts.
-- A shared Prisma database client.
-- A catalog seed script that preserves existing products.
-- A database integration test for the nonnegative-stock constraint.
-- A worker startup skeleton.
-- GitHub Actions configuration and commit-message checks.
-
-Order processing, worker recovery, and complete contract verification
-remain part of subsequent implementation work.
-
-Database-backed routes, migrations, worker processing, and Docker Compose
-are delivered through subsequent feature tickets.
-
-## Prerequisites
-
-- Git.
-- Node.js 22.12 or newer within Node.js 22.
-- npm.
-- WSL2 Ubuntu for Windows container and Kubernetes work.
-
-Use the exact Node.js version recorded in `.nvmrc` when available.
-
-Verify your tools:
+Use Git, Node.js 22 (22.12 or newer), npm, Docker with Compose, and curl.
+Use Bash for the examples below. On Windows, run them in WSL with access
+to the Docker engine.
 
 ```bash
-git --version
-node --version
-npm --version
-```
-
-Run project commands from the repository root.
-
-## Installation
-
-Clone the repository and install the locked dependencies:
-
-```bash
-git clone https://github.com/devopsapproach/capstone.git
-cd capstone
+git clone https://github.com/devopsapproach/fulfillops.git
+cd fulfillops
 npm ci
-```
-
-The install runs the `prepare` script to initialize Husky hooks.
-
-## Environment configuration
-
-Create `.env` if it does not already exist:
-
-```bash
 test -f .env || cp .env.example .env
 ```
 
-Replace the placeholder credentials with your local values.
+Set local credentials in .env. Match the PostgreSQL role, password, port and
+database in each connection URL. URL-encode special characters in passwords.
+Keep .env and Kubernetes secrets out of Git. Compose initializes credentials
+only on an empty PostgreSQL volume.
 
-| Variable                  | Purpose                                                          |
-| ------------------------- | ---------------------------------------------------------------- |
-| `POSTGRES_USER`           | Development database administrator created during initialization |
-| `POSTGRES_PASSWORD`       | Development database password                                    |
-| `POSTGRES_DB`             | Development database name                                        |
-| `POSTGRES_PORT`           | PostgreSQL port exposed on the host                              |
-| `DATABASE_URL`            | Connection used by the application and Prisma migrations         |
-| `TEST_DATABASE_URL`       | Connection to the isolated test database                         |
-| `PORT`                    | API listening port                                               |
-| `NODE_ENV`                | Runtime mode                                                     |
-| `LOG_LEVEL`               | Logging verbosity                                                |
-| `WORKER_POLL_INTERVAL_MS` | Planned worker polling interval                                  |
-| `WORKER_LEASE_MS`         | Planned job lease duration                                       |
-| `WORKER_MAX_ATTEMPTS`     | Planned default attempt limit                                    |
-| `WORKER_RETRY_BASE_MS`    | Planned retry backoff base                                       |
+| Setting                                                              | Purpose                                                                                                        |
+| -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT` | Compose database and host port. Defaults include user `fulfillops`, database `fulfillops_dev` and port `5432`. |
+| `DATABASE_URL`                                                       | Application and migration connection. Use `localhost` from the host and `db` inside Compose or Kubernetes.     |
+| `TEST_DATABASE_URL`                                                  | Isolated PostgreSQL database named `fulfillops_test`.                                                          |
+| `PORT`, `NODE_ENV`, `LOG_LEVEL`                                      | API port (default `8080`), runtime mode and log level.                                                         |
+| `WORKER_POLL_INTERVAL_MS`, `WORKER_LEASE_MS`, `WORKER_RETRY_BASE_MS` | Worker defaults are 500 ms, 10000 ms and 1000 ms. Each job stores its own attempt limit.                       |
 
-The username, password, database, and port in `DATABASE_URL` must match
-the development database configuration.
-
-Use URL-encoded passwords in connection URLs when they contain special
-characters.
-
-Compose initializes database credentials only when its data directory is
-empty. Editing `.env` does not change an existing database user's password.
-
-Keep real credentials in `.env` and commit only `.env.example`.
-
-Applications running on the host connect through `localhost`.
-Applications inside Compose use the database service hostname `db`.
-
-Values in `.env` are loaded by the application through dotenv.
-They do not automatically become Bash variables.
-
-## Database setup
-
-Start PostgreSQL:
+Start **only PostgreSQL** for host development. In Docker Desktop the container
+is named `fulfillops-db`.
 
 ```bash
-docker compose up -d db
-docker compose ps db
-```
-
-Generate the Prisma client, apply committed migrations, and seed the catalog:
-
-```bash
+docker compose up -d --wait db
 npm run db:generate
 npm run db:migrate:deploy
 npm run db:seed
 ```
 
-The initial catalog contains:
+Run the seed command only for an empty, disposable local catalog with
+`NODE_ENV=development` and a loopback database URL. The current seed overwrites
+prices and available stock for the three demo SKUs. Keep it out of routine
+deployments and away from databases with orders you want to preserve.
 
-| SKU      | Unit price in cents | Initial stock |
-| -------- | ------------------: | ------------: |
-| KIT-100  |                1299 |             7 |
-| PART-200 |                 599 |            12 |
-| PACK-300 |                 249 |             5 |
+| SKU      | Price in cents | Initial stock |
+| -------- | -------------: | ------------: |
+| KIT-100  |           1299 |             7 |
+| PART-200 |            599 |            12 |
+| PACK-300 |            249 |             5 |
 
-Seeding inserts missing products. Existing prices and stock remain unchanged,
-including stock already consumed by orders.
+Start `npm run dev:api` and `npm run dev:worker` in separate terminals. Both
+use the same database. For compiled execution, run `npm run build`, then
+`npm run start:api` and `npm run start:worker` in separate terminals.
 
-Inspect the catalog:
+For an all-container run, stop the host processes and run
+`docker compose up -d --build`. Compose starts PostgreSQL, waits for the
+migration service to exit successfully, then starts the API and worker.
+Initialize a fresh catalog from the host using the setup above. Inspect
+startup with `docker compose ps -a` and `docker compose logs migrate api worker`.
+Use `docker compose down` to stop while preserving the volume.
 
-```bash
-docker compose exec db psql -U fulfillops -d fulfillops_dev \
-  -c "SELECT sku, unit_price_cents, available FROM products ORDER BY sku;"
-```
+## Use the API
 
-These inspection commands assume the default development username and
-database name.
+Set `API` to `http://localhost:8080` locally or to your Kubernetes API address.
+Keep your worker running when you want submitted orders to complete.
 
-Stop the stack while preserving its database volume:
-
-```bash
-docker compose down
-```
-
-## Schema changes
-
-Edit `prisma/schema.prisma`, then generate a draft migration:
-
-```bash
-npx prisma format
-npx prisma validate
-npm run db:migrate:dev -- --name describe_your_change --create-only
-```
-
-Review the generated SQL and add required custom constraints or indexes
-before applying the new migration.
+| Method and path             | Result                                                                                                   |
+| --------------------------- | -------------------------------------------------------------------------------------------------------- |
+| GET /health/live            | Process liveness.                                                                                        |
+| GET /health/ready           | Readiness including database checks.                                                                     |
+| GET /metrics                | Prometheus text for the responding API process.                                                          |
+| GET /api/v1/catalog         | SKUs with unit prices in integer cents.                                                                  |
+| GET /api/v1/inventory/:sku  | Available stock, or 404 for an unknown SKU.                                                              |
+| POST /api/v1/orders         | Requires JSON and an Idempotency-Key header. Returns 202 with the order ID and queued acceptance status. |
+| GET /api/v1/orders/:orderId | Current status and total in cents, or 404.                                                               |
 
 ```bash
-npm run db:migrate:dev
-npm run db:generate
+API=http://localhost:8080
+curl -fsS "$API/health/ready"
+curl -fsS "$API/api/v1/catalog"
+curl -fsS "$API/api/v1/inventory/KIT-100"
+
+ORDER_KEY="demo-$(date +%s)"
+ORDER_BODY='{"customer_id":"CUST-DEMO","items":[{"sku":"KIT-100","quantity":1}]}'
+
+curl -i "$API/api/v1/orders" \
+  -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $ORDER_KEY" \
+  --data "$ORDER_BODY"
 ```
 
-Commit the schema and migration files, including `migration_lock.toml`.
+Copy the returned order ID into `ORDER_ID`, then run
+`curl -fsS "$API/api/v1/orders/$ORDER_ID"`. Repeat GET until the worker
+completes the order. Replay the original POST with the same key and body to
+see the same order ID. The replay response still says `queued` because it
+is the acceptance response. GET reports the current state. A changed payload
+with the same key returns 409. Insufficient stock also returns 409, with a
+different error code. Missing keys return 400 and invalid quantities return 422.
 
-Once a migration has been applied and shared, preserve it and create a new
-migration for later changes. Generated Prisma client files are recreated
-locally and during builds.
+## Database and worker
 
-## Start the API during development
+PostgreSQL stores products, orders, order items, jobs and fulfillment
+receipts. Stock cannot become negative, idempotency keys are unique, and
+each fulfilled order has one receipt. The worker uses short transactions
+to claim work and verify ownership before completion. Failed attempts can
+be rescheduled with backoff. Expired leases are recovered. Exhausted jobs
+become dead letters and their orders fail with reserved stock retained.
 
 ```bash
-npm run dev:api
+docker compose exec -T db psql -U fulfillops -d fulfillops_dev \
+  -c 'SELECT sku, unit_price_cents, available FROM products ORDER BY sku;'
 ```
 
-The default address is `http://localhost:8080`.
+Use `npm run db:migrate:deploy` to apply committed migrations. For schema
+changes use `npm run db:migrate:dev -- --name describe_change` on a development
+database and review the SQL. Commit the schema and migration together and
+generate the client with `npm run db:generate`. Keep applied migrations intact.
 
-In another terminal, verify liveness:
+## Kubernetes and Argo CD
+
+The base in [infra/k8s/base](infra/k8s/base) defines two API replicas, two
+workers, PostgreSQL with a PVC, Services and a migration Job. Argo applies
+the platform first, runs the migration hook, then updates the deployments.
+Catalog initialization is a separate step on a fresh test database.
+
+For a new local kind cluster, install kind and kubectl and run
+`kind create cluster --name fulfillops-t19 --config infra/kind.yaml`.
+For an existing cluster, start `fulfillops-t19-control-plane` in the Docker
+engine that owns it. Kubernetes starts the pods. Select and verify the context.
 
 ```bash
-curl -i http://localhost:8080/health/live
+kubectl config use-context kind-fulfillops-t19
+kubectl get nodes
 ```
 
-Expected status:
-
-```text
-HTTP/1.1 200 OK
-```
-
-Expected body:
-
-```json
-{ "status": "ok" }
-```
-
-Stop the development process with `Ctrl+C`.
-
-Liveness confirms that the API process is responding.
-Database readiness will be implemented separately.
-
-## Build and run compiled code
+The development overlay uses locally loaded images with pull policy
+`Never`. Build and load both images before committing their tags to
+[the development overlay](infra/k8s/overlays/dev/kustomization.yaml).
 
 ```bash
-npm run build
-npm run start:api
+TAG="dev-$(git rev-parse --short HEAD)"
+docker build --target runtime -t "fulfillops:$TAG" .
+docker build --target migrate -t "fulfillops-migrate:$TAG" .
+kind load docker-image "fulfillops:$TAG" "fulfillops-migrate:$TAG" \
+  --name fulfillops-t19
+kubectl kustomize infra/k8s/overlays/dev
 ```
 
-Stop an existing development server before starting the compiled API
-on the same port.
+Create the namespace with `kubectl create namespace fulfillops-lab` if it
+does not exist. Create a Secret named `fulfillops-db` in that namespace
+with keys `POSTGRES_PASSWORD` and `DATABASE_URL`. The base expects role
+`fulfillops` and database `fulfillops_test` at `db:5432`. Use the same
+password in both entries, URL-encoded in the URL. For example, supply the
+two entries in a private environment file and run
+`kubectl -n fulfillops-lab create secret generic fulfillops-db --from-env-file=/path/to/private-db.env`.
+Reuse an existing Secret when the PVC already contains data.
 
-## Run checks
-
-Run all foundation checks:
+Install Argo CD into the `argocd` namespace using the team's reviewed
+release. Give Argo read access to the repository if it is private. Review
+[the Application](infra/argocd/application.yaml), set its target revision
+to the pushed branch containing your overlay, then apply it with
+`kubectl apply -f infra/argocd/application.yaml`.
 
 ```bash
-npm run check
+# Terminal A. Keep open for the Argo UI and CLI.
+kubectl -n argocd port-forward service/argocd-server 8090:443
+
+# Terminal B. Keep open for API requests.
+kubectl -n fulfillops-lab port-forward service/api 18082:8080
 ```
 
-This executes type checking, linting, formatting verification,
-unit tests, and the production build.
-
-Individual commands:
-
-| Command                | Purpose                  |
-| ---------------------- | ------------------------ |
-| `npm run typecheck`    | Check TypeScript types   |
-| `npm run lint`         | Run ESLint               |
-| `npm run format:check` | Verify formatting        |
-| `npm run format`       | Apply formatting         |
-| `npm test`             | Run unit tests           |
-| `npm run build`        | Compile application code |
-
-Before opening a pull request:
+In a third terminal, authenticate with
+`argocd login localhost:8090 --username admin --insecure` for the local
+instance, then inspect the deployment:
 
 ```bash
-npm run format
-npm run check
-git diff
-git status
+argocd app get fulfillops --hard-refresh
+argocd app wait fulfillops --sync --health --timeout 300
+kubectl -n fulfillops-lab get deployment,pods,jobs,pvc
+kubectl -n fulfillops-lab logs job/fulfillops-migrate --tail=100
+kubectl -n fulfillops-lab logs -l app=fulfillops-worker --prefix --tail=20
+curl -fsS http://localhost:18082/health/ready
 ```
 
-Review formatting changes before committing.
+Expect two ready API pods, two running workers, a completed migration Job
+and a bound PVC. If auto-sync is disabled, run `argocd app sync fulfillops`
+before waiting. If a pod reports `ErrImageNeverPull`, check the exact tag
+and load it into kind. If the migration Job failed, read its pod logs.
+For a published deployment, use CI-published runtime and migration digests
+in the registry overlay and configure registry credentials as needed.
 
-## Database integration tests
+## Tests and instructor demo
 
-Integration tests use the separate `fulfillops_test` database.
+- Run `npm run check` for types, lint, formatting, unit tests and build.
+- Run `npm run test:integration` against a migrated, separate
+  `fulfillops_test` database. Start just the Compose database and keep
+  background consumers of that database stopped. Supertest starts its
+  own API. `npm run test:worker` runs the focused worker suite.
+- Use the public checker against a fresh isolated test deployment with
+  both API and worker running. It creates orders and consumes stock.
+- Show a new order completing, replay it, then verify one receipt and one
+  reservation. Show recovery and retry evidence, persistence across a
+  database pod replacement, GitOps drift correction and a Git revert.
+- Use the instructor rollout probe against a stable local Service endpoint
+  such as the kind NodePort on `localhost:18080` if configured. Start it
+  before triggering the rollout. Keep the CSV and rollout timestamps.
+- Show the benchmark sample count, p95 and errors, along with CI results,
+  SBOMs, scan reports and published image digests where available.
 
-On first initialization, `scripts/init-db.sql` creates the test user and
-database. Its current password is a development placeholder. Set your
-chosen password before configuring the test connection.
-
-Open PostgreSQL:
+For local integration tests, set `TEST_DATABASE_URL` in .env. The Compose
+init SQL creates the local test role and database on a fresh volume.
+Apply migrations to that URL explicitly:
 
 ```bash
-docker compose exec db psql -U fulfillops -d fulfillops_dev
-```
+node --input-type=module -e '
+import "dotenv/config";
+import { spawnSync } from "node:child_process";
 
-Inspect existing users and databases:
-
-```text
-\du
-\l
-```
-
-If the test role exists, set its password:
-
-```text
-\password fulfillops_test
-```
-
-If the role or database is missing, create only the missing item:
-
-```sql
-CREATE ROLE fulfillops_test LOGIN;
-CREATE DATABASE fulfillops_test OWNER fulfillops_test;
-```
-
-Then set the test password with `\password fulfillops_test` and exit
-using `\q`.
-
-Update `TEST_DATABASE_URL` in `.env` with the matching password.
-
-For the migration command, export the same connection in your terminal:
-
-```bash
-export TEST_DATABASE_URL='postgresql://fulfillops_test:YOUR_TEST_PASSWORD@localhost:5432/fulfillops_test'
-```
-
-Apply migrations and run the integration suite:
-
-```bash
-DATABASE_URL="$TEST_DATABASE_URL" npm run db:migrate:deploy
+const url = process.env.TEST_DATABASE_URL;
+if (!url || new URL(url).pathname !== "/fulfillops_test") {
+  throw new Error("TEST_DATABASE_URL must target the isolated fulfillops_test database");
+}
+const run = spawnSync("npm", ["run", "db:migrate:deploy"], {
+  stdio: "inherit",
+  env: { ...process.env, DATABASE_URL: url },
+});
+process.exit(run.status ?? 1);
+'
 npm run test:integration
 ```
 
-The inline `DATABASE_URL` override targets the test database for that
-migration command.
-
-The integration test uses `TEST_DATABASE_URL` directly. An exported
-environment variable takes precedence over its value in `.env`, so keep
-them consistent.
-
-The initial test verifies that PostgreSQL rejects negative stock and
-rolls back its temporary test data. It requires migrations but does not
-require catalog seeding.
-
-`npm run check` runs the foundation checks and unit tests.
-Run `npm run test:integration` separately for database verification.
-
-## Branch and review workflow
-
-Start feature work from an updated `main`:
+The guarded `scripts/reset-test-data.ts` removes transaction data and
+restores catalog stock. Run it only on a disposable test database, with
+all API and worker processes using that database stopped.
 
 ```bash
-git switch main
-git pull --ff-only
-git switch -c feat/your-feature
-```
-
-Keep commits focused and use Conventional Commits:
-
-```text
-feat(api): implement catalog endpoint
-feat(worker): claim pending jobs
-test(orders): verify idempotent replay
-docs(setup): clarify local configuration
-```
-
-Push your branch and open a pull request:
-
-```bash
-git push -u origin feat/your-feature
-```
-
-Another developer reviews the change before merge.
-
-See `docs/commit/COMMIT_CONVENTION.md` for commit-message conventions.
-
-## Team ownership and handoffs
-
-| Developer | Primary responsibility                      | First handoff                               |
-| --------- | ------------------------------------------- | ------------------------------------------- |
-| Jaimie    | API routes, validation, order acceptance    | API entry point and contract behavior       |
-| Iulian    | Schema, migrations, database access, worker | Agreed schema and generated database client |
-| Sultan    | Tooling, Compose, CI, integration harness   | Running database and reproducible checks    |
-
-All developers review the architecture agreement before starting
-features that depend on shared schema or interfaces.
-
-Schema changes require coordination with the API and worker owners.
-Shared command and configuration changes must be reflected in this README.
-
-## Planned commands
-
-## Database commands and handoff
-
-| Command                     | Purpose                                 |
-| --------------------------- | --------------------------------------- |
-| `npm run db:generate`       | Generate the Prisma client              |
-| `npm run db:migrate:dev`    | Create and apply development migrations |
-| `npm run db:migrate:deploy` | Apply committed migrations              |
-| `npm run db:seed`           | Insert missing catalog products         |
-| `npm run test:integration`  | Run database integration tests          |
-| `npm run dev:worker`        | Start the current worker skeleton       |
-
-After pulling database changes, teammates should run:
-
-1. `npm ci`
-2. `npm run db:generate`
-3. `npm run db:migrate:deploy`
-4. `npm run db:seed`
-
-API and worker code import the shared `database` client from
-`shared/database.ts`, using the appropriate relative path.
-
-The guarded test-reset command and concurrency test suite remain planned.
-
-## Assessment tests
-
-The supplied public checker creates orders and consumes inventory.
-
-Once the application and isolated test database are implemented,
-run final contract verification with:
-
-```bash
+set -o pipefail
+mkdir -p artifacts/final-demo
 python3 assessment/fulfillops_public_checker.py \
-  --base-url http://localhost:8080 \
-  --concurrency \
-  --stress
+  --base-url http://localhost:18082 --concurrency --stress \
+  2>&1 | tee artifacts/final-demo/public-checker.txt
+grep -F 'RESULT: 15 passed / 0 failed / 0 skipped' \
+  artifacts/final-demo/public-checker.txt
 ```
 
-This command assumes the supplied checker is stored in `assessment/`.
-
-Use a fresh isolated test dataset. The final expected result is:
-
-```text
-15 passed / 0 failed / 0 skipped
-```
-
-Worker crash recovery, bounded retries, Kubernetes, and GitOps require
-additional evidence beyond the public checker.
-
-## Architecture
-
-See `docs/ADR-001.md` for the agreed schema, states, transaction boundaries,
-interfaces, configuration, and ownership.
-
-## Start the worker
-
-Complete database setup before starting the worker.
-
-For development, run these commands in separate terminals:
-
-```bash
-# Terminal 1
-npm run dev:api
-```
-
-```bash
-# Terminal 2
-npm run dev:worker
-```
-
-For compiled execution:
-
-```bash
-npm run db:generate
-npm run build
-```
-
-Then use separate terminals:
-
-```bash
-npm run start:api
-```
-
-```bash
-npm run start:worker
-```
-
-The API and worker must connect to the same application database.
-
-Starting the worker does not start the HTTP API.
-
-Stop each process with Ctrl+C. The worker allows a bounded shutdown
-period for in-flight work.
+For more detail see the [architecture](docs/architecture.md),
+[database schema](docs/database-schema.md), [local stack](docs/local-stack.md),
+[CI workflow](.github/workflows/ci.yml) and
+[commit conventions](docs/commit/COMMIT_CONVENTION.md).

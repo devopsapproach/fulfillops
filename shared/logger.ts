@@ -7,7 +7,7 @@ export const logger = {
         timestamp: new Date().toISOString(),
         level: "INFO",
         ...payload,
-      })
+      }),
     );
   },
   error: (payload: Record<string, unknown>, error?: unknown) => {
@@ -24,7 +24,7 @@ export const logger = {
         level: "ERROR",
         ...payload,
         ...errorMeta,
-      })
+      }),
     );
   },
 };

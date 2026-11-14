@@ -3,7 +3,12 @@ export class MetricsRegistry {
   private durationBuckets = new Map<string, number[]>();
   private durationSum = new Map<string, number>();
   private durationCount = new Map<string, number>();
-  
+  private ordersCreatedTotal = 0;
+
+  public recordOrderCreated(): void {
+    this.ordersCreatedTotal += 1;
+  }
+
   // Standard latency bounds for web APIs in seconds
   private readonly buckets = [0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
 
@@ -13,16 +18,27 @@ export class MetricsRegistry {
       .join(",");
   }
 
-  public observeRequest(method: string, route: string, status: number, durationSeconds: number) {
+  public observeRequest(
+    method: string,
+    route: string,
+    status: number,
+    durationSeconds: number,
+  ) {
     const labels = { method, route, status: String(status) };
     const labelStr = this.buildLabelString(labels);
 
     // 1. Record Counter
-    this.requestsTotal.set(labelStr, (this.requestsTotal.get(labelStr) || 0) + 1);
+    this.requestsTotal.set(
+      labelStr,
+      (this.requestsTotal.get(labelStr) || 0) + 1,
+    );
 
     // 2. Record Histogram
     if (!this.durationBuckets.has(labelStr)) {
-      this.durationBuckets.set(labelStr, new Array(this.buckets.length).fill(0));
+      this.durationBuckets.set(
+        labelStr,
+        new Array(this.buckets.length).fill(0),
+      );
       this.durationSum.set(labelStr, 0);
       this.durationCount.set(labelStr, 0);
     }
@@ -34,8 +50,11 @@ export class MetricsRegistry {
         currentBuckets[i]++;
       }
     }
-    
-    this.durationSum.set(labelStr, this.durationSum.get(labelStr)! + durationSeconds);
+
+    this.durationSum.set(
+      labelStr,
+      this.durationSum.get(labelStr)! + durationSeconds,
+    );
     this.durationCount.set(labelStr, this.durationCount.get(labelStr)! + 1);
   }
 
@@ -47,6 +66,10 @@ export class MetricsRegistry {
     output += `# TYPE fulfillops_http_requests_total counter\n`;
     for (const [labels, count] of this.requestsTotal.entries()) {
       output += `fulfillops_http_requests_total{${labels}} ${count}\n`;
+      output +=
+        "# HELP fulfillops_orders_created_total New orders committed by this API process\n";
+      output += "# TYPE fulfillops_orders_created_total counter\n";
+      output += `fulfillops_orders_created_total ${this.ordersCreatedTotal}\n\n`;
     }
 
     // Histogram
@@ -72,7 +95,11 @@ export const metricsRegistry = new MetricsRegistry();
 // Express Middleware
 import type { Request, Response, NextFunction } from "express";
 
-export function observeMetrics(req: Request, res: Response, next: NextFunction) {
+export function observeMetrics(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   const start = process.hrtime();
 
   res.on("finish", () => {
@@ -87,7 +114,7 @@ export function observeMetrics(req: Request, res: Response, next: NextFunction) 
       req.method,
       route,
       res.statusCode,
-      durationSeconds
+      durationSeconds,
     );
   });
 

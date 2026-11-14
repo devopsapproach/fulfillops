@@ -81,7 +81,7 @@ export function createApp({ database }: AppDependencies) {
 
   // Expose metrics BEFORE the observer to avoid recursive scraping pollution
   app.use("/metrics", metricsRouter);
-  
+
   // Start the observation timer for all subsequent business routes
   app.use(observeMetrics);
 
